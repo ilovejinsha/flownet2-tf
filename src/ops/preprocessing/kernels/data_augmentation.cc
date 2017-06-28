@@ -5,75 +5,77 @@
 #include "augmentation_base.h"
 #include "data_augmentation.h"
 #include "tensorflow/core/framework/op_kernel.h"
+
+#include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
+#include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/framework/types.h"
-#include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/lib/core/status.h"
+#include "tensorflow/core/platform/logging.h"
 
-using namespace tensorflow;
-
-using CPUDevice = Eigen::ThreadPoolDevice;
-using GPUDevice = Eigen::GpuDevice;
+namespace tensorflow {
+typedef Eigen::ThreadPoolDevice CPUDevice;
+typedef Eigen::GpuDevice        GPUDevice;
 
 inline float clamp(float f, float a, float b) {
   return fmaxf(a, fminf(f, b));
 }
 
 template<>
-struct AugmentFunctor<CPUDevice>{
-  void operator()(const CPUDevice& d,
-                  const int        batch_size,
-                  const int        channels,
-                  const int        src_width,
-                  const int        src_height,
-                  const int        src_count,
-                  const int        out_width,
-                  const int        out_height,
-                  const float     *src_data,
-                  float           *out_data,
-                  const float     *transMats) {
-    // TODO: optimize this
-    for (int n = 0; n < batch_size; n++) {
-      for (int y = 0; y < out_height; y++) {
-        for (int x = 0; x < out_width; x++) {
-          const float *transMat = transMats + n * 6;
-          float xpos            = x * transMat[0] + y * transMat[1] + transMat[2];
-          float ypos            = x * transMat[3] + y * transMat[4] + transMat[5];
+void Augment(const CPUDevice& d,
+             const int        batch_size,
+             const int        channels,
+             const int        src_width,
+             const int        src_height,
+             const int        src_count,
+             const int        out_width,
+             const int        out_height,
+             const float     *src_data,
+             float           *out_data,
+             const float     *transMats) {
+  // TODO: optimize this
+  for (int n = 0; n < batch_size; n++) {
+    for (int y = 0; y < out_height; y++) {
+      for (int x = 0; x < out_width; x++) {
+        const float *transMat = transMats + n * 6;
+        float xpos            = x * transMat[0] + y * transMat[1] + transMat[2];
+        float ypos            = x * transMat[3] + y * transMat[4] + transMat[5];
 
-          xpos = clamp(xpos, 0.0f, (float)(src_width) - 1.05f);
-          ypos = clamp(ypos, 0.0f, (float)(src_height) - 1.05f);
+        xpos = clamp(xpos, 0.0f, (float)(src_width) - 1.05f);
+        ypos = clamp(ypos, 0.0f, (float)(src_height) - 1.05f);
 
-          float tlx = floor(xpos);
-          float tly = floor(ypos);
+        float tlx = floor(xpos);
+        float tly = floor(ypos);
 
-          float xdist = xpos - tlx;
-          float ydist = ypos - tly;
+        float xdist = xpos - tlx;
+        float ydist = ypos - tly;
 
-          for (int c = 0; c < channels; c++) {
-            // Bilinear interpolation
-            int srcTLIdx = ((n * src_height + tly) * src_width + tlx) * channels + c;
-            int srcTRIdx =
-              std::min((int)(((n * src_height + tly) * src_width + (tlx + 1)) * channels + c),
-                       src_count);
-            int srcBLIdx =
-              std::min((int)(((n * src_height + (tly + 1)) * src_width + tlx) * channels + c),
-                       src_count);
-            int srcBRIdx =
-              std::min((int)(((n * src_height + (tly + 1)) * src_width + (tlx + 1)) * channels +
-                             c),
-                       src_count);
+        for (int c = 0; c < channels; c++) {
+          // Bilinear interpolation
+          int srcTLIdx = ((n * src_height + tly) * src_width + tlx) * channels + c;
+          int srcTRIdx =
+            std::min((int)(((n * src_height + tly) * src_width + (tlx + 1)) * channels + c),
+                     src_count);
+          int srcBLIdx =
+            std::min((int)(((n * src_height + (tly + 1)) * src_width + tlx) * channels + c),
+                     src_count);
+          int srcBRIdx =
+            std::min((int)(((n * src_height + (tly + 1)) * src_width + (tlx + 1)) * channels +
+                           c),
+                     src_count);
 
-            float dest = (1 - xdist) * (1 - ydist) * src_data[srcTLIdx]
-                         + (xdist) * (ydist) * src_data[srcBRIdx]
-                         + (1 - xdist) * (ydist) * src_data[srcBLIdx]
-                         + (xdist) * (1 - ydist) * src_data[srcTRIdx];
+          float dest = (1 - xdist) * (1 - ydist) * src_data[srcTLIdx]
+                       + (xdist) * (ydist) * src_data[srcBRIdx]
+                       + (1 - xdist) * (ydist) * src_data[srcBLIdx]
+                       + (xdist) * (1 - ydist) * src_data[srcTRIdx];
 
-            out_data[((n * out_height + y) * out_width + x) * channels + c] = dest;
-          }
+          out_data[((n * out_height + y) * out_width + x) * channels + c] = dest;
         }
       }
     }
   }
-};
+}
 
 template<typename Device>
 class DataAugmentation : public OpKernel {
@@ -180,7 +182,7 @@ class DataAugmentation : public OpKernel {
                                                            spat_transform_a);
 
       // Perform augmentation either on CPU or GPU
-      AugmentFunctor<Device>()(
+      Augment<Device>(
         ctx->eigen_device<Device>(),
         batch_size,
         channels,
@@ -234,7 +236,7 @@ class DataAugmentation : public OpKernel {
                                                            spat_transform_b);
 
       // Perform augmentation either on CPU or GPU
-      AugmentFunctor<Device>()(
+      Augment<Device>(
         ctx->eigen_device<Device>(),
         batch_size,
         channels,
@@ -286,10 +288,26 @@ REGISTER_KERNEL_BUILDER(Name("DataAugmentation")
                         .HostMemory("transforms_from_b"),
                         DataAugmentation<CPUDevice>)
 
-#ifdef GOOGLE_CUDA
+#if GOOGLE_CUDA
+
+// template<>
+// void AugmentFunctor<GPUDevice>::operator()(
+//   const GPUDevice& d,
+//   const int        batch_size,
+//   const int        channels,
+//   const int        src_width,
+//   const int        src_height,
+//   const int        src_count,
+//   const int        out_width,
+//   const int        out_height,
+//   const float     *src_data,
+//   float           *out_data,
+//   const float     *transMats);
+
 REGISTER_KERNEL_BUILDER(Name("DataAugmentation")
                         .Device(DEVICE_GPU)
                         .HostMemory("transforms_from_a")
                         .HostMemory("transforms_from_b"),
                         DataAugmentation<GPUDevice>)
 #endif // GOOGLE_CUDA
+} // namespace tensorflow

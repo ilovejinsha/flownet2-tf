@@ -1,20 +1,20 @@
-#ifdef GOOGLE_CUDA
+#if GOOGLE_CUDA
 
 #define EIGEN_USE_GPU
-#define EIGEN_USE_THREADS
 
 #include "augmentation_base.h"
 #include "data_augmentation.h"
-#include "tensorflow/core/framework/op_kernel.h"
-#include "tensorflow/core/framework/register_types.h"
-#include "tensorflow/core/framework/types.h"
-#include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/cuda_kernel_helper.h"
 
-using namespace tensorflow;
+#include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/register_types.h"
+#include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/framework/tensor_shape.h"
+#include "tensorflow/core/framework/types.h"
+#include "tensorflow/core/lib/core/status.h"
+#include "tensorflow/core/platform/logging.h"
 
-#define EIGEN_USE_GPU
-
+namespace tensorflow {
 inline __device__ __host__ float clamp(float f, float a, float b) {
   return fmaxf(a, fminf(f, b));
 }
@@ -69,28 +69,28 @@ __global__ void SpatialAugmentation(
   }
 }
 
-template<>
-struct AugmentFunctor<GPUDevice>{
-  void operator()(const GPUDevice& d,
-                  const int        batch_size,
-                  const int        channels,
-                  const int        src_width,
-                  const int        src_height,
-                  const int        src_count,
-                  const int        out_width,
-                  const int        out_height,
-                  const float     *src_data,
-                  float           *out_data,
-                  const float     *transMats) {
-    const int out_count     = batch_size * out_height * out_width * channels;
-    CudaLaunchConfig config = GetCudaLaunchConfig(out_count, d);
+typedef Eigen::GpuDevice GPUDevice;
 
-    SpatialAugmentation << < config.block_count, config.thread_per_block, 0, d.stream() >> > (
-      config.virtual_thread_count, src_width, src_height, channels, src_count,
-      out_width, out_height,
-      src_data, out_data, transMats);
-  }
-};
+template<>
+void Augment(const GPUDevice& d,
+             const int        batch_size,
+             const int        channels,
+             const int        src_width,
+             const int        src_height,
+             const int        src_count,
+             const int        out_width,
+             const int        out_height,
+             const float     *src_data,
+             float           *out_data,
+             const float     *transMats) {
+  const int out_count     = batch_size * out_height * out_width * channels;
+  CudaLaunchConfig config = GetCudaLaunchConfig(out_count, d);
+
+  SpatialAugmentation << < config.block_count, config.thread_per_block, 0, d.stream() >> > (
+    config.virtual_thread_count, src_width, src_height, channels, src_count,
+    out_width, out_height,
+    src_data, out_data, transMats);
+}
 
 //
 // template<typename Device>
@@ -340,5 +340,5 @@ struct AugmentFunctor<GPUDevice>{
 //     std::vector<float>params_b_spread_;
 //     std::vector<float>params_b_prob_;
 // };
-
+} // namespace tensorflow
 #endif // GOOGLE_CUDA
