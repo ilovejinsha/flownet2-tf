@@ -34,13 +34,21 @@ void Augment(const CPUDevice& d,
              const float     *src_data,
              float           *out_data,
              const float     *transMats) {
-  // TODO: optimize this
   for (int n = 0; n < batch_size; n++) {
+    const float *transMat = transMats + n * 6;
+
+    printf("Using transmat: %f %f %f %f %f %f\n",
+           transMat[0],
+           transMat[1],
+           transMat[2],
+           transMat[3],
+           transMat[4],
+           transMat[5]);
+
     for (int y = 0; y < out_height; y++) {
       for (int x = 0; x < out_width; x++) {
-        const float *transMat = transMats + n * 6;
-        float xpos            = x * transMat[0] + y * transMat[1] + transMat[2];
-        float ypos            = x * transMat[3] + y * transMat[4] + transMat[5];
+        float xpos = x * transMat[0] + y * transMat[1] + transMat[2];
+        float ypos = x * transMat[3] + y * transMat[4] + transMat[5];
 
         xpos = clamp(xpos, 0.0f, (float)(src_width) - 1.05f);
         ypos = clamp(ypos, 0.0f, (float)(src_height) - 1.05f);
@@ -51,26 +59,32 @@ void Augment(const CPUDevice& d,
         float xdist = xpos - tlx;
         float ydist = ypos - tly;
 
+        int srcTLIdxOffset = ((n * src_height + (int)tly) * src_width + (int)tlx) * channels;
+
+        // ((n * src_height + tly) * src_width + (tlx + 1)) * channels
+        int srcTRIdxOffset = srcTLIdxOffset + channels;
+
+        // ((n * src_height + (tly + 1)) * src_width + tlx) * channels
+        int srcBLIdxOffset = srcTLIdxOffset + channels * src_width;
+
+        // ((n * src_height + (tly + 1)) * src_width + (tlx + 1)) * channels
+        int srcBRIdxOffset = srcTLIdxOffset + channels + channels * src_width;
+
+        int outIdxOffset = ((n * out_height + y) * out_width + x) * channels;
+
         for (int c = 0; c < channels; c++) {
           // Bilinear interpolation
-          int srcTLIdx = ((n * src_height + tly) * src_width + tlx) * channels + c;
-          int srcTRIdx =
-            std::min((int)(((n * src_height + tly) * src_width + (tlx + 1)) * channels + c),
-                     src_count);
-          int srcBLIdx =
-            std::min((int)(((n * src_height + (tly + 1)) * src_width + tlx) * channels + c),
-                     src_count);
-          int srcBRIdx =
-            std::min((int)(((n * src_height + (tly + 1)) * src_width + (tlx + 1)) * channels +
-                           c),
-                     src_count);
+          int srcTLIdx = srcTLIdxOffset + c;
+          int srcTRIdx = std::min(srcTRIdxOffset + c, src_count);
+          int srcBLIdx = std::min(srcBLIdxOffset + c, src_count);
+          int srcBRIdx = std::min(srcBRIdxOffset + c, src_count);
 
           float dest = (1 - xdist) * (1 - ydist) * src_data[srcTLIdx]
                        + (xdist) * (ydist) * src_data[srcBRIdx]
                        + (1 - xdist) * (ydist) * src_data[srcBLIdx]
                        + (xdist) * (1 - ydist) * src_data[srcTRIdx];
 
-          out_data[((n * out_height + y) * out_width + x) * channels + c] = dest;
+          out_data[outIdxOffset + c] = dest;
         }
       }
     }
@@ -292,20 +306,6 @@ REGISTER_KERNEL_BUILDER(Name("DataAugmentation")
                         DataAugmentation<CPUDevice>)
 
 #if GOOGLE_CUDA
-
-// template<>
-// void AugmentFunctor<GPUDevice>::operator()(
-//   const GPUDevice& d,
-//   const int        batch_size,
-//   const int        channels,
-//   const int        src_width,
-//   const int        src_height,
-//   const int        src_count,
-//   const int        out_width,
-//   const int        out_height,
-//   const float     *src_data,
-//   float           *out_data,
-//   const float     *transMats);
 
 REGISTER_KERNEL_BUILDER(Name("DataAugmentation")
                         .Device(DEVICE_GPU)
