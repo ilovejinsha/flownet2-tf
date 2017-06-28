@@ -245,9 +245,9 @@ class DataAugmentation : public OpKernel {
         src_count,
         out_width,
         out_height,
-        input_a.data(),
-        output_a.data(),
-        spat_transform_a.data());
+        input_b.data(),
+        output_b.data(),
+        spat_transform_b.data());
 
       // FlowAugmentation needs the inverse
       // TODO: To avoid rewriting, can we invert when we read on the
