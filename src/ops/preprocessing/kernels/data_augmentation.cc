@@ -208,12 +208,15 @@ class DataAugmentation : public OpKernel {
 
       std::vector<AugmentationCoeff> coeffs_b;
 
-      gen_spatial_transform = aug_b.should_do_spatial_transform();
+      bool gen_spatial_transform_b = aug_b.should_do_spatial_transform();
 
       for (int n = 0; n < batch_size; n++) {
-        AugmentationCoeff coeff;
+        // TODO: This will break if spatially augmenting image B but not image A
+        AugmentationCoeff coeff(coeffs_a[n]);
 
-        if (gen_spatial_transform) {
+        // If we did a spatial transform on image A, we need to do the same one
+        // (+ possibly more) on image B
+        if (gen_spatial_transform_b) {
           AugmentationLayerBase::generate_valid_spatial_coeffs(aug_b, coeff,
                                                                src_width, src_height,
                                                                out_width, out_height);
